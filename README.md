@@ -5,11 +5,11 @@ A desktop controller and 3D viewer for a Unitree G1 joystick policy trained with
 ## Requirements
 
 - Linux desktop session with a working graphical display (Tkinter and the MuJoCo viewer need a GUI).
-- A MuJoCo Playground checkout, including its Python environment and compatible JAX, Brax, Orbax, MuJoCo, and `pygame` dependencies.
+- A MuJoCo Playground checkout and the Python dependencies listed in `requirements.txt`.
 - A complete G1 joystick PPO training run and its checkpoint directory.
 - A connected SDL-compatible gamepad for joystick control. The control panel can also start, pause, stop, and reset the simulation without a gamepad.
 
-The simplest setup is to use the Python environment from the MuJoCo Playground checkout that produced the policy. The default launcher expects the checkout at `~/mujoco_playground` and Python at `~/mujoco_playground/.venv/bin/python`. Tkinter must also be available to that Python installation (on some Linux distributions it is provided by a system package).
+Tkinter must also be available to the Python installation (on some Linux distributions it is provided by a system package).
 
 ## Set Up Your Checkpoints
 
@@ -49,13 +49,21 @@ Checkpoints for another task, a different observation or action layout, or a pol
 
 ## Launch
 
-From the repository root, run:
+Create the local virtual environment and install its dependencies once:
+
+```bash
+uv venv --python 3.12 --prompt jax-g1-simulation .venv
+MUJOCO_PLAYGROUND_ROOT="${MUJOCO_PLAYGROUND_ROOT:-$HOME/mujoco_playground}"
+uv pip install --python .venv/bin/python -r requirements.txt -e "$MUJOCO_PLAYGROUND_ROOT"
+```
+
+Then, from the repository root, start the simulator:
 
 ```bash
 ./launch.sh
 ```
 
-To use a different MuJoCo Playground checkout or Python executable:
+The launcher uses `.venv/bin/python` by default. To use a different MuJoCo Playground checkout or Python executable:
 
 ```bash
 MUJOCO_PLAYGROUND_ROOT=/path/to/mujoco_playground \
@@ -68,7 +76,7 @@ The launcher defaults `JAX_PLATFORMS` to `cpu`, which is useful when the install
 JAX_PLATFORMS=your-platform ./launch.sh
 ```
 
-Use the platform name supported by your installed JAX version. The launcher adds both this repository and the MuJoCo Playground checkout to `PYTHONPATH` before starting the application.
+Use the platform name supported by your installed JAX version. When `MUJOCO_PLAYGROUND_ROOT` is set, the launcher adds that checkout and this repository to `PYTHONPATH`. Otherwise, MuJoCo Playground is loaded from the installed dependencies.
 
 ## Use The Simulator
 
@@ -99,23 +107,16 @@ The main modules are:
 - `g1_simulator/gamepad.py`: SDL joystick input and command mapping.
 - `g1_simulator/ui.py`: Tkinter control panel and checkpoint selection.
 
-Run the unit tests with the Python environment used for the project:
+Run the unit tests in the local environment:
 
 ```bash
-SIMULATOR_PYTHON=/path/to/python
-"$SIMULATOR_PYTHON" -m unittest discover -s tests
-```
-
-Or run them directly from the MuJoCo Playground environment:
-
-```bash
-~/mujoco_playground/.venv/bin/python -m unittest discover -s tests
+./.venv/bin/python -m unittest discover -s tests
 ```
 
 ## Troubleshooting
 
-- **Python executable not found:** set `SIMULATOR_PYTHON` to the Python executable in your MuJoCo Playground environment.
-- **MuJoCo Playground source not found:** set `MUJOCO_PLAYGROUND_ROOT` to the checkout directory that contains the `mujoco_playground/` package.
+- **Python executable not found:** create `.venv` and install `requirements.txt`, or set `SIMULATOR_PYTHON` to another compatible Python executable.
+- **MuJoCo Playground import error:** reinstall `requirements.txt`, or set `MUJOCO_PLAYGROUND_ROOT` to the checkout directory that contains the `mujoco_playground/` package.
 - **No complete PPO checkpoints found:** confirm `data/training_checkpoints` points to the checkpoint root, not a numbered checkpoint directory, and that at least one numbered directory has both required marker/config files.
 - **Training environment config not found:** ensure the checkpoint root contains the run's `config.json` next to the numbered checkpoint directories.
 - **Incompatible observation/action size or normalization:** use a checkpoint trained for the G1 joystick flat-terrain task with the compatible actor layout described above.
