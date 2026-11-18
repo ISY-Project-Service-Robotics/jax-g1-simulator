@@ -1,59 +1,123 @@
 # JAX G1 Simulator
 
-A desktop controller and 3D viewer for the Unitree G1 joystick policy trained
-with MuJoCo Playground. The robot's actions come from the Brax PPO checkpoint;
-the simulator does not implement a separate walking controller.
+A desktop controller and 3D viewer for a Unitree G1 joystick policy trained with MuJoCo Playground. The robot is controlled by a Brax PPO policy restored from a training checkpoint; this project does not provide a separate walking controller.
 
-## Architecture
+## Requirements
 
-- `g1_simulator/checkpoints.py` discovers complete Orbax checkpoints and
-  restores their saved Brax network and observation normalizer.
-- `g1_simulator/simulation.py` runs the original
-  `G1JoystickFlatTerrain` MJX environment and mirrors its state into the
-  MuJoCo viewer.
-- `g1_simulator/gamepad.py` maps a connected joystick to the policy's forward,
-  lateral, and yaw commands.
-- `g1_simulator/ui.py` provides checkpoint selection, simulation controls,
-  and live status and joint readings.
+- Linux desktop session with a working graphical display (Tkinter and the MuJoCo viewer need a GUI).
+- A MuJoCo Playground checkout, including its Python environment and compatible JAX, Brax, Orbax, MuJoCo, and `pygame` dependencies.
+- A complete G1 joystick PPO training run and its checkpoint directory.
+- A connected SDL-compatible gamepad for joystick control. The control panel can also start, pause, stop, and reset the simulation without a gamepad.
 
-The policy takes the original 103-element `state` observation (with its
-checkpoint-saved normalization), outputs 29 actions, and the original
-environment applies its 0.5 action scale at a 50 Hz control rate / 500 Hz
-physics rate. The saved 216-element privileged observation is used by the
-critic architecture but is not an actor input.
+The simplest setup is to use the Python environment from the MuJoCo Playground checkout that produced the policy. The default launcher expects the checkout at `~/mujoco_playground` and Python at `~/mujoco_playground/.venv/bin/python`. Tkinter must also be available to that Python installation (on some Linux distributions it is provided by a system package).
 
-The checkpoint network config stores optional kernel initializers as `null`.
-Some Brax releases mishandle those entries in `checkpoint.load_policy`; the
-loader here uses Brax's own Orbax deserializer and network factory while
-preserving the saved defaults, without editing the checkpoint files.
+## Set Up Your Checkpoints
+
+The simulator looks for training files in `data/training_checkpoints` inside this repository. Point that path at the **training run's checkpoint root**. That root must contain the environment's `config.json` and one or more numbered checkpoint directories, for example:
+
+```text
+/path/to/training-run/checkpoints/
+  config.json
+  100000000/
+    commit_success.txt
+    ppo_network_config.json
+    ... Orbax checkpoint data ...
+  200000000/
+    commit_success.txt
+    ppo_network_config.json
+    ... Orbax checkpoint data ...
+```
+
+Use the complete checkpoint output from training; do not copy only the JSON files. The simulator discovers numbered directories that contain both `commit_success.txt` and `ppo_network_config.json`, and orders them by training step. For example, if `data/training_checkpoints` does not already exist:
+
+```bash
+ln -s /path/to/training-run/checkpoints data/training_checkpoints
+```
+
+Replace the example path with the checkpoint root produced by your run. The same root-level `config.json` is used to recreate the training environment. The path is fixed in `g1_simulator/ui.py`; `MUJOCO_PLAYGROUND_ROOT` configures the source checkout, not the checkpoint directory.
+
+### Checkpoint compatibility
+
+This application currently loads the `G1JoystickFlatTerrain` environment and expects a compatible Brax PPO actor checkpoint with:
+
+- A 103-element `state` actor observation.
+- 29 policy actions.
+- Observation normalization enabled and saved with the policy.
+- The network configuration, normalizer, and Orbax state from the same training run.
+
+Checkpoints for another task, a different observation or action layout, or a policy without the saved normalizer are not compatible. The 216-element privileged observation belongs to the critic; it is not the actor input.
 
 ## Launch
 
-The default launcher uses the training environment at `~/mujoco_playground`
-and its `.venv`. The repository's `data/training_checkpoints` link should point
-to the training run's `checkpoints` directory.
+From the repository root, run:
 
 ```bash
 ./launch.sh
 ```
 
-The launcher defaults JAX to CPU to avoid selecting an incompatible CUDA plugin
-in the existing environment. Set `JAX_PLATFORMS` to a working accelerator
-platform to override this. To use different paths:
+To use a different MuJoCo Playground checkout or Python executable:
 
 ```bash
 MUJOCO_PLAYGROUND_ROOT=/path/to/mujoco_playground \
 SIMULATOR_PYTHON=/path/to/python ./launch.sh
 ```
 
-The application opens a control panel and a MuJoCo viewer. Choose a checkpoint
-and click **Load checkpoint**, connect a gamepad, then click **Start**.
-Controls: left stick forward/lateral, right-stick horizontal for yaw, **A**
-reset, **Start** pause/resume, and **Back** stop. Panel buttons provide the same
-simulation controls. The stick mapping assumes SDL joystick axes 0/1 for the
-left stick and axis 3 (or axis 2 if only three axes are available) for
-right-stick horizontal.
+The launcher defaults `JAX_PLATFORMS` to `cpu`, which is useful when the installed JAX environment has no compatible accelerator. If your JAX and MuJoCo Playground setup supports an accelerator, you can override it, for example:
 
-If running in a different Python environment, install the same dependencies as
-the training checkout (MuJoCo Playground, JAX, Brax, Orbax, pygame, and
-Tkinter), then set `MUJOCO_PLAYGROUND_ROOT` and `SIMULATOR_PYTHON` as above.
+```bash
+JAX_PLATFORMS=your-platform ./launch.sh
+```
+
+Use the platform name supported by your installed JAX version. The launcher adds both this repository and the MuJoCo Playground checkout to `PYTHONPATH` before starting the application.
+
+## Use The Simulator
+
+1. Start the application and wait for the control panel and MuJoCo viewer to initialize.
+2. Select a checkpoint in the dropdown and click **Load checkpoint**. The latest discovered step is selected by default.
+3. Click **Start** in the control panel, or use the gamepad's Start button to resume.
+4. Use **Pause**, **Stop**, and **Reset** in the panel as needed. Close the MuJoCo viewer or control panel to exit.
+
+Gamepad mapping (SDL axes/buttons):
+
+| Input | Action |
+| --- | --- |
+| Left stick up/down | Forward/backward command |
+| Left stick left/right | Lateral command |
+| Right stick horizontal | Yaw command |
+| A button | Reset the robot |
+| Start button | Toggle pause/resume |
+| Back button | Stop the simulation |
+
+The default axis mapping uses SDL axes 0 and 1 for the left stick and axis 3 for right-stick horizontal (axis 2 is used if the controller has only three axes). A small deadzone filters stick drift. The panel reports policy, gamepad, simulation time, control frequency, command, and selected joint positions.
+
+## Development
+
+The main modules are:
+
+- `g1_simulator/checkpoints.py`: checkpoint discovery, validation, and Brax policy restoration.
+- `g1_simulator/simulation.py`: MJX stepping and MuJoCo viewer synchronization.
+- `g1_simulator/gamepad.py`: SDL joystick input and command mapping.
+- `g1_simulator/ui.py`: Tkinter control panel and checkpoint selection.
+
+Run the unit tests with the Python environment used for the project:
+
+```bash
+SIMULATOR_PYTHON=/path/to/python
+"$SIMULATOR_PYTHON" -m unittest discover -s tests
+```
+
+Or run them directly from the MuJoCo Playground environment:
+
+```bash
+~/mujoco_playground/.venv/bin/python -m unittest discover -s tests
+```
+
+## Troubleshooting
+
+- **Python executable not found:** set `SIMULATOR_PYTHON` to the Python executable in your MuJoCo Playground environment.
+- **MuJoCo Playground source not found:** set `MUJOCO_PLAYGROUND_ROOT` to the checkout directory that contains the `mujoco_playground/` package.
+- **No complete PPO checkpoints found:** confirm `data/training_checkpoints` points to the checkpoint root, not a numbered checkpoint directory, and that at least one numbered directory has both required marker/config files.
+- **Training environment config not found:** ensure the checkpoint root contains the run's `config.json` next to the numbered checkpoint directories.
+- **Incompatible observation/action size or normalization:** use a checkpoint trained for the G1 joystick flat-terrain task with the compatible actor layout described above.
+- **JAX accelerator/plugin errors:** run with the default CPU setting, or configure a JAX/MuJoCo Playground accelerator stack that matches the installed drivers and packages.
+- **No graphical viewer:** run from a desktop session with a display available; the simulator opens both a Tkinter window and a MuJoCo viewer.
